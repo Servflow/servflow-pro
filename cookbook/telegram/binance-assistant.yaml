@@ -1,0 +1,197 @@
+enabled: true
+schedule:
+    enabled: false
+    cron: ""
+    next: ""
+id: telegram_bot_cred_storage
+actions:
+    agent_llm:
+        name: agent_llm
+        type: agent
+        config:
+            conversationID: ""
+            fileUpload: {}
+            integrationID: openai-main
+            returnLastMessage: false
+            systemPrompt: You are a helpful telegram bot, for performing actions on behalf of a user, you have access to tools to help you achieve your request, for now you can only fetch balance
+            toolConfigs:
+                - mcpConfig:
+                    endpoint: ""
+                    headers: {}
+                    toolsList: null
+                  type: workflow
+                  workflowConfig:
+                    description: This is for fetching the account balance of the user.
+                    name: fetch_balance
+                    params: []
+                    returnFile:
+                        identifier: ""
+                        type: ""
+                    returnValue: '{{.id_c7cf6c30b93d4bde81596c72be8ec166 }}'
+                    start: action.id_c7cf6c30b93d4bde81596c72be8ec166
+                    type: string
+            userPrompt: '{{ body "message.text" }}'
+        next: action.telegram_reply
+        fail: response.error
+    id_1ebdf9e285ab41a7ac22c404846b3039:
+        name: fetch credentials
+        type: fetch
+        config:
+            datasourceOptions: {}
+            failIfEmpty: true
+            filters:
+                - comparator: '{{ body "message.from.id" }}'
+                  field: user_id
+                  operation: ==
+            integrationID: mongo-valid
+            shouldFail: true
+            single: true
+            table: credentials
+        next: action.agent_llm
+        fail: action.parse_command
+    id_5f4781afa80b4f8f80fd392d66804d57:
+        name: no credentials response
+        type: http
+        config:
+            body:
+                chat_id: '{{ body "message.chat.id" }}'
+                text: Please add credentials first with /save_creds <api_key> <secret_key>
+            expectedResponseCode: "200"
+            failIfResponseEmpty: true
+            headers:
+                Content-Type: application/json
+            method: POST
+            responsePath: ""
+            url: https://api.telegram.org/bot{{ secret "TELEGRAM_BOT_TOKEN" }}/sendMessage
+        next: response.success
+        fail: response.error
+    id_87c0064d21374aeb859f23919e997a85:
+        name: Reply credentials saved
+        type: http
+        config:
+            body:
+                chat_id: '{{ body "message.chat.id" }}'
+                text: Credentials saved successfully
+            expectedResponseCode: ""
+            failIfResponseEmpty: true
+            headers:
+                Content-Type: application/json
+            method: POST
+            responsePath: ""
+            url: https://api.telegram.org/bot{{ secret "TELEGRAM_BOT_TOKEN" }}/sendMessage
+        next: response.success
+        fail: response.error
+    id_c7cf6c30b93d4bde81596c72be8ec166:
+        name: Binance Account Balance
+        type: binance/accountbalance
+        config:
+            futures: false
+            integrationID: telegram_bot_cred_storage_binance
+            symbol: ""
+        next: ""
+        fail: ""
+    parse_command:
+        name: parse_command
+        type: javascript
+        config:
+            dependencies: ""
+            script: "function servflowRun(vars) {\n  const paramText = \"{{ body \"message.text\"}}\"\n  try {\n    const text = paramText;\n    const match = text.trim().match(/^\\/(\\w+)\\s*(.*)$/);\n\n    // If no match or it's not the save command, return empty defaults\n    if (!match || match[1].toLowerCase() !== \"save_creds\") {\n      return { command: \"\", args: [] };\n    }\n\n    const command = \"/\" + match[1];\n    let args;\n\n    try {\n      args = JSON.parse(match[2]);\n    } catch {\n      // Fallback: args as space-split array\n      args = match[2]?.trim() \n        ? match[2].trim().split(/\\s+/) \n        : [];\n    }\n\n    return { command, args };\n  } catch (err) {\n    // Return empty defaults on error to keep the flow resilient\n    return { command: \"\", args: [] };\n  }\n}"
+        next: conditional.is_save_creds
+        fail: response.error
+    save_creds:
+        name: save_creds
+        type: store
+        config:
+            datasourceOptions: {}
+            fields:
+                api_key: '{{ index .parse_command.args 0  }}'
+                api_secret: '{{ index .parse_command.args 1 }}'
+                creds: '{{ join .parse_command.args ","  }}'
+                saved_at: '{{ now }}'
+                user_id: '{{ body "message.from.id" }}'
+            integrationID: mongo-valid
+            table: credentials
+        next: action.id_87c0064d21374aeb859f23919e997a85
+        fail: response.error
+    telegram_reply:
+        name: telegram_reply
+        type: http
+        config:
+            body:
+                chat_id: '{{ body "message.chat.id" }}'
+                text: '{{ .agent_llm | escape }}'
+            expectedResponseCode: ""
+            failIfResponseEmpty: true
+            headers:
+                Content-Type: application/json
+            method: POST
+            responsePath: ""
+            url: https://api.telegram.org/bot{{ secret "TELEGRAM_BOT_TOKEN" }}/sendMessage
+        next: response.success
+        fail: response.error
+conditionals:
+    is_save_creds:
+        name: is_save_creds
+        onTrue: action.save_creds
+        onFalse: action.id_5f4781afa80b4f8f80fd392d66804d57
+        expression: '{{ eq .parse_command.command "/save_creds" }}'
+        structure:
+            - - content: .parse_command.command
+                comparison: '"/save_creds"'
+                function: eq
+                title: ""
+            - - content: len .parse_command.args
+                comparison: "2"
+                function: ge
+                title: ""
+responses:
+    error:
+        name: error
+        code: 500
+        template: ""
+        type: ""
+        responseObject:
+            value: ""
+            fields:
+                error:
+                    value: '{{ .error }}'
+                    fields: {}
+        file:
+            type: ""
+            identifier: ""
+    success:
+        name: success
+        code: 200
+        template: ""
+        type: ""
+        responseObject:
+            value: ""
+            fields:
+                message:
+                    value: Reply sent via Telegram
+                    fields: {}
+        file:
+            type: ""
+            identifier: ""
+http:
+    listenPath: /telegram
+    method: POST
+    next: action.id_1ebdf9e285ab41a7ac22c404846b3039
+    corsAllowedOrigins: []
+mcpTool:
+    enabled: false
+    name: ""
+    description: ""
+    args: {}
+    result: ""
+    start: ""
+integrations:
+    telegram_bot_cred_storage_binance:
+        id: ""
+        config:
+            api_key: '{{.id_1ebdf9e285ab41a7ac22c404846b3039.api_key }}'
+            secret_key: '{{ .id_1ebdf9e285ab41a7ac22c404846b3039.api_secret }}'
+            testnet: false
+            timeout: 30
+        type: binance
+        lazyLoad: true
