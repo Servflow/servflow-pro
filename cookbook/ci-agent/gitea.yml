@@ -166,6 +166,7 @@ actions:
     fail: response.error
 conditionals:
   id_25c71d5fb8944c5e87db23301ef86037:
+    name: is pull request
     onTrue: action.run_analysis
     onFalse: response.id_497870e54ee44cfa955568c739374c8e
     expression: ""
@@ -176,6 +177,7 @@ conditionals:
           title: ""
 responses:
   error:
+    name: error
     code: 500
     template: ""
     type: ""
@@ -192,6 +194,7 @@ responses:
       type: ""
       identifier: ""
   id_497870e54ee44cfa955568c739374c8e:
+    name: not pull request
     code: 400
     template: ""
     type: ""
@@ -202,6 +205,7 @@ responses:
       type: ""
       identifier: ""
   success:
+    name: success
     code: 200
     template: ""
     type: ""
