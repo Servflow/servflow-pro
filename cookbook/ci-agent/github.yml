@@ -1,0 +1,286 @@
+enabled: true
+schedule:
+  enabled: false
+  cron: ""
+  next: ""
+name: github-wh-second
+id: fa4dffc2-0ca9-4e34-9f74-fedc244180e8
+actions:
+  id_4a806a7450194f50b1111162bc601d0c:
+    name: Diff response
+    type: http
+    config:
+      failIfResponseEmpty: true
+      headers:
+        Accept: application/vnd.github.v3.diff
+        Authorization: token {{ .id_4499bbc9bf8946b6b6c9c7551a9bf2f4 }}
+      method: GET
+      url: https://api.github.com/repos/{{ body "repository.full_name"}}/pulls/{{ body "pull_request.number" }}
+    next: action.id_45ba6ed637714a0d830946d8d0b2a4ec
+    fail: ""
+  id_45ba6ed637714a0d830946d8d0b2a4ec:
+    name: AI Agent
+    type: agent
+    config:
+      integrationID: << .IntegrationID >>
+      returnLastMessage: true
+      systemPrompt: |
+        You are a senior code review AI designed for CI/CD workflows. Your responsibilities are:
+        - Analyze the supplied GitHub pull request diff to summarize what was changed and why.
+        - Identify enhancements, risks, bugs, or anti-patterns.
+        - If a referenced file or line requires more context to provide insightful feedback, use the "command" tool to fetch the file contents with 'cat <filename>'.
+        - To leave file-specific comments or inline annotations, use the "comment_file" tool by specifying the filename, line number, and comment details.
+
+        Your output should include:
+        - "Summary": A concise explanation of the PR's intent.
+        - "Enhancements": Positive or beneficial changes.
+        - "Potential Issues": Problematic code, risks, or anti-patterns (reference relevant lines/files).
+        - "Other Observations": Maintainability, style, or general notes.
+
+        If you want to leave feedback directly on a file, use the "comment_file" tool with the following structure:
+        - file: the target filename (as seen in the diff)
+        - line: the line number to comment upon
+        - content: specific and actionable comment(s) for that file and line
+        - details: (optional) further context or additional information for the comment
+
+        Always consider file- and line-level insight for actionable feedback.
+
+        Example:
+        comment_file tool parameters:
+        - file: controllers/userController.js
+        - line: 42
+        - content: "Consider handling exceptions to prevent application crash."
+        - details: "This line may throw if the input is not validated."
+      toolConfigs:
+        - mcpConfig:
+            endpoint: ""
+            headers: {}
+            toolsList: []
+          type: workflow
+          workflowConfig:
+            description: Executes a single command passed in the command param
+            name: execute_command
+            params:
+              - command
+            returnFile:
+              identifier: ""
+              type: ""
+            returnValue: "{{escape .id_c1ac93bd7d534619b69fabf785979bf2 }}"
+            start: action.id_c1ac93bd7d534619b69fabf785979bf2
+            type: string
+        - mcpConfig:
+            endpoint: ""
+            headers: {}
+            toolsList: []
+          type: workflow
+          workflowConfig:
+            description: "This should be used to comment on files specifically "
+            name: comment_file
+            params:
+              - content
+              - file
+              - line
+            returnFile:
+              identifier: ""
+              type: ""
+            returnValue: ""
+            start: action.id_894eb84c4a2b440f88a639cb9a6e9b7b
+            type: string
+      userPrompt: |
+        GitHub PR Title: {{ body "pull_request.title" }}
+        PR Diff:
+        {{ escape .id_4a806a7450194f50b1111162bc601d0c }}
+
+        1. Enumerate all filenames in the diff.
+        2. For each file, if further inspection is required for quality review or actionable comment, use a tool execution to fetch content (with 'cat <filename>') or add line comments with the 'comment_file' tool, specifying file, line, content, and (optional) details and commit_id.
+        3. Provide your review as follows:
+          - Summary
+          - Enhancements
+          - Potential Issues (with references if possible)
+          - Other Observations
+
+        If you recommend a code fix or spot a significant issue in a particular file, create a comment for that file using the 'comment_file' tool with the file, line, content, details, and commit_id parameters. Make actionable, file-/line-specific recommendations when needed; otherwise, keep feedback in your main output.
+    next: conditional.id_bfeb651b587747b9a5f01e849c597c10
+    fail: ""
+  id_81d46dff82d94fdba75ff06996275db3:
+    name: Comment Overview
+    type: http
+    config:
+      body:
+        body: |
+          ## Code Review Overview
+
+          {{escape .id_45ba6ed637714a0d830946d8d0b2a4ec }}
+      expectedResponseCode: "201"
+      failIfResponseEmpty: true
+      headers:
+        Accept: application/vnd.github.v3+json
+        Authorization: token {{ .id_4499bbc9bf8946b6b6c9c7551a9bf2f4 }}
+        Content-Type: application/json
+      method: POST
+      responsePath: id
+      url: https://api.github.com/repos/{{ body "repository.full_name"}}/issues/{{ body "pull_request.number" }}/comments
+    next: action.id_299305ccde8b433080cf6b71f4d4daa3
+    fail: ""
+  id_98b99d56e76543fcba9d240e65f9ea8f:
+    name: Shell Script
+    type: shell
+    config:
+      script: |-
+        mkdir {{ .id_c5de23f72a5a41b4909de8f1f7f5b422.task_id }} && cd {{ .id_c5de23f72a5a41b4909de8f1f7f5b422.task_id }};
+        git clone https://x-access-token:{{ .id_4499bbc9bf8946b6b6c9c7551a9bf2f4 }}@github.com/{{ body "repository.full_name"}}.git .
+    next: action.id_b9d515e8214d4dccb7af0029d90dfd07
+    fail: ""
+  id_517f7c83fd3749d6ab99407158dd0804:
+    name: Delete folder
+    type: shell
+    config:
+      script: rm -rf {{ .id_c5de23f72a5a41b4909de8f1f7f5b422.task_id }};
+    next: ""
+    fail: ""
+  id_894eb84c4a2b440f88a639cb9a6e9b7b:
+    name: Comment file
+    type: http
+    config:
+      body: |-
+        {
+          "body": "{{ escape ( tool_param "content" ) | js }}",
+          "path": "{{ tool_param "file" }}",
+          "commit_id": "{{ body "pull_request.head.sha" }}",
+          "line": {{ tool_param "line" }},
+          "side": "RIGHT"
+        }
+      expectedResponseCode: "201"
+      failIfResponseEmpty: true
+      headers:
+        Accept: application/vnd.github.v3+json
+        Authorization: token {{ .id_4499bbc9bf8946b6b6c9c7551a9bf2f4 }}
+        Content-Type: application/json
+      method: POST
+      url: https://api.github.com/repos/{{ body "repository.full_name"}}/pulls/{{ body "pull_request.number" }}/comments
+    next: ""
+    fail: ""
+  id_4499bbc9bf8946b6b6c9c7551a9bf2f4:
+    name: GitHub Installation Token
+    type: github_token
+    config:
+      client_id: '{{ secret "<< .AppIDSecret >>" }}'
+      installation_id: '{{ body "installation.id" }}'
+      pem: '{{ escape (secret "<< .AppPEMSecret >>") }}'
+    next: response.id_9c6b47d123db4b898f3d2eabc7f209a0
+    fail: ""
+    dispatch:
+      - action.id_98b99d56e76543fcba9d240e65f9ea8f
+  id_299305ccde8b433080cf6b71f4d4daa3:
+    name: Store Key
+    type: store_key
+    config:
+      key: '{{ body "pull_request.head.sha" }}'
+      value: "{{ tostring .id_81d46dff82d94fdba75ff06996275db3 }}"
+    next: action.id_517f7c83fd3749d6ab99407158dd0804
+    fail: action.id_517f7c83fd3749d6ab99407158dd0804
+  id_b9d515e8214d4dccb7af0029d90dfd07:
+    name: Get Key
+    type: get_key
+    config:
+      failIfEmpty: false
+      key: '{{ body "pull_request.head.sha" }}'
+    next: action.id_4a806a7450194f50b1111162bc601d0c
+    fail: ""
+  id_c1ac93bd7d534619b69fabf785979bf2:
+    name: execute Command
+    type: command
+    config:
+      command: cd {{ .id_c5de23f72a5a41b4909de8f1f7f5b422.task_id }} && {{ tool_param "command" }}
+    next: ""
+    fail: ""
+  id_c5de23f72a5a41b4909de8f1f7f5b422:
+    name: Generate ID
+    type: javascript
+    config:
+      script: |
+        function servflowRun(vars) {
+          function uuidv4() {
+            // Generate a random v4 UUID (RFC4122)
+            return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+              var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
+              return v.toString(16);
+            });
+          }
+          return { task_id: uuidv4() };
+        }
+    next: action.id_4499bbc9bf8946b6b6c9c7551a9bf2f4
+    fail: ""
+  id_f2df3e4c914a494d81026a9c012d2ce0:
+    name: Update Comment Overview
+    type: http
+    config:
+      body:
+        body: |
+          ## Code Review Overview
+
+          {{escape .id_45ba6ed637714a0d830946d8d0b2a4ec }}
+      expectedResponseCode: "200"
+      failIfResponseEmpty: true
+      headers:
+        Accept: application/vnd.github.v3+json
+        Authorization: token {{ .id_4499bbc9bf8946b6b6c9c7551a9bf2f4 }}
+        Content-Type: application/json
+      method: PATCH
+      responsePath: id
+      url: https://api.github.com/repos/{{ body "repository.full_name"}}/issues/comments/{{ .id_b9d515e8214d4dccb7af0029d90dfd07 }}
+    next: action.id_517f7c83fd3749d6ab99407158dd0804
+    fail: action.id_517f7c83fd3749d6ab99407158dd0804
+conditionals:
+  id_291c1247590c40009956dbc40bbec3d7:
+    name: Is PR Action
+    onTrue: action.id_c5de23f72a5a41b4909de8f1f7f5b422
+    onFalse: response.id_9c6b47d123db4b898f3d2eabc7f209a0
+    expression: ""
+    structure:
+      - - content: body "action"
+          comparison: '"opened"'
+          function: eq
+          title: ""
+      - - content: body "action"
+          comparison: '"synchronize"'
+          function: eq
+          title: ""
+      - - content: body "action"
+          comparison: '"reopened"'
+          function: eq
+          title: ""
+  id_bfeb651b587747b9a5f01e849c597c10:
+    name: Has Existing Comment
+    onTrue: action.id_f2df3e4c914a494d81026a9c012d2ce0
+    onFalse: action.id_81d46dff82d94fdba75ff06996275db3
+    expression: ""
+    structure:
+      - - content: .id_b9d515e8214d4dccb7af0029d90dfd07
+          function: notempty
+          title: ""
+responses:
+  id_9c6b47d123db4b898f3d2eabc7f209a0:
+    name: Success
+    code: 200
+    template: ""
+    type: ""
+    responseObject:
+      value: OK
+      fields: {}
+    file:
+      type: ""
+      identifier: ""
+http:
+  listenPath: << .WebhookPath >>
+  method: POST
+  next: conditional.id_291c1247590c40009956dbc40bbec3d7
+  corsAllowedOrigins: []
+mcpTool:
+  enabled: false
+  name: ""
+  description: ""
+  args: {}
+  result: ""
+  start: ""
+integrations: {}
