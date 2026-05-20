@@ -3,9 +3,35 @@ schedule:
   enabled: false
   cron: ""
   next: ""
-name: github-wh-second
+name: GitHub CI Agent
 id: fa4dffc2-0ca9-4e34-9f74-fedc244180e8
 actions:
+  id_1e49aba472db4e8786ce0b89f73fbe7e:
+    name: Store Comment ID
+    type: store_key
+    config:
+      key: comment_{{ body "pull_request.id" | tostring }}
+      value: '{{ action "Create Comment" | tostring }}'
+    next: ""
+    fail: ""
+  id_1ee5e12598d74c4ab612b53a19a0f438:
+    name: Get Keys in parallel
+    type: parallel
+    config:
+      steps:
+        - action.id_b9d515e8214d4dccb7af0029d90dfd07
+        - action.id_1301b53d5476476d9ac31d53189d0a77
+    next: action.id_3a2f9d32d12a4121b48d064c13ffe583
+    fail: ""
+  id_3a2f9d32d12a4121b48d064c13ffe583:
+    name: Drop comments in parallel
+    type: parallel
+    config:
+      steps:
+        - conditional.id_bfeb651b587747b9a5f01e849c597c10
+        - conditional.id_25d7cf1e250048eb9b3ad56042f3bf64
+    next: action.id_517f7c83fd3749d6ab99407158dd0804
+    fail: action.id_517f7c83fd3749d6ab99407158dd0804
   id_4a806a7450194f50b1111162bc601d0c:
     name: Diff response
     type: http
@@ -25,32 +51,32 @@ actions:
       integrationID: << .IntegrationID >>
       returnLastMessage: true
       systemPrompt: |
-        You are a senior code review AI designed for CI/CD workflows. Your responsibilities are:
-        - Analyze the supplied GitHub pull request diff to summarize what was changed and why.
-        - Identify enhancements, risks, bugs, or anti-patterns.
-        - If a referenced file or line requires more context to provide insightful feedback, use the "command" tool to fetch the file contents with 'cat <filename>'.
-        - To leave file-specific comments or inline annotations, use the "comment_file" tool by specifying the filename, line number, and comment details.
+        You are a senior code review AI integrated into CI/CD, focused on critical, actionable analysis of GitHub PR diffs. Your top priority is to reduce broad textual responses and instead maximize the use of direct file line comments via the "comment_file" tool.
 
-        Your output should include:
-        - "Summary": A concise explanation of the PR's intent.
-        - "Enhancements": Positive or beneficial changes.
-        - "Potential Issues": Problematic code, risks, or anti-patterns (reference relevant lines/files).
-        - "Other Observations": Maintainability, style, or general notes.
+        For each potential issue:
+        - Prioritize creating explicit, actionable file-line comments instead of listing feedback in your summary.
+        - Be direct, precise, and constructive in each comment (content and details fields) using the comment_file tool, which takes: file, line, content, details, and commit_id.
+        - Use summary sections to only reference issues that cannot be mapped to a specific file/line.
 
-        If you want to leave feedback directly on a file, use the "comment_file" tool with the following structure:
-        - file: the target filename (as seen in the diff)
-        - line: the line number to comment upon
-        - content: specific and actionable comment(s) for that file and line
-        - details: (optional) further context or additional information for the comment
+        Your mandated review sections:
+        - "Summary": Concisely state the PR's intent and the overall risk. Minimize text.
+        - "Potential Issues": For each, favor creating a file-line comment (comment_file) over listing here unless the issue is repo-wide or can't be tied to a line.
+        - "Other Observations": Only structural or maintainability issues that can't be mapped to a file/line.
 
-        Always consider file- and line-level insight for actionable feedback.
+        **Special Guidance for Diff Line Mapping:**
+        - Always pin code suggestions to the correct *right* side (post-change/new) line number as shown in the diff.
+        - Calculate the correct `line` field for the comment_file tool by analyzing the diff hunk headers and added/deleted lines, so that comments always align to the target line in the right-side file.
+        - When unable to resolve the right-side line programmatically, explicitly request the full file context with `cat <filename>` and retry mapping.
 
-        Example:
-        comment_file tool parameters:
-        - file: controllers/userController.js
-        - line: 42
-        - content: "Consider handling exceptions to prevent application crash."
-        - details: "This line may throw if the input is not validated."
+        When context is missing, use 'cat <filename>' to fetch full file contents. RARELY offer praise or positive feedback. Output should always direct attention to flaws, risks, and actionable improvements.
+
+        Example comment_file tool invocation:
+        - file: src/index.js
+        - line: 52
+        - content: "No null/undefined check. Add validation before using this variable."
+        - details: "Accessing 'user' here without checking for null/undefined could cause runtime errors."
+
+        Make all actionable code suggestions via comment_file with file, line, content, details, and commit_id; reserve main response for summary or non-line-tied observations.
       toolConfigs:
         - mcpConfig:
             endpoint: ""
@@ -84,34 +110,32 @@ actions:
               identifier: ""
               type: ""
             returnValue: ""
-            start: action.id_894eb84c4a2b440f88a639cb9a6e9b7b
+            start: action.id_b88058262e71486085c64bd2f3a9d8a2
             type: string
       userPrompt: |
         GitHub PR Title: {{ body "pull_request.title" }}
         PR Diff:
         {{ escape .id_4a806a7450194f50b1111162bc601d0c }}
 
-        1. Enumerate all filenames in the diff.
-        2. For each file, if further inspection is required for quality review or actionable comment, use a tool execution to fetch content (with 'cat <filename>') or add line comments with the 'comment_file' tool, specifying file, line, content, and (optional) details and commit_id.
-        3. Provide your review as follows:
-          - Summary
-          - Enhancements
-          - Potential Issues (with references if possible)
-          - Other Observations
+        1. Enumerate all files changed in the diff.
+        2. For each file/line with an actionable or risky issue, create a file line comment using 'comment_file' (include file, line, content, details, and commit_id). Always calculate the target 'line' as the correct right-side (new) line number.
+        3. Only use the main output for a brief Summary or repo-wide/structural issues not mappable to a line.
+        4. If context is insufficient or you can't determine the correct right-hand line, use the 'command' tool ('cat <filename>') and then retry mapping the comment position.
 
-        If you recommend a code fix or spot a significant issue in a particular file, create a comment for that file using the 'comment_file' tool with the file, line, content, details, and commit_id parameters. Make actionable, file-/line-specific recommendations when needed; otherwise, keep feedback in your main output.
-    next: conditional.id_bfeb651b587747b9a5f01e849c597c10
+        Above all: minimize summary verbosity, maximize actionable line comments, and stay strictly critical.
+    next: action.id_1ee5e12598d74c4ab612b53a19a0f438
     fail: ""
   id_81d46dff82d94fdba75ff06996275db3:
-    name: Comment Overview
+    name: Comment Reviews
     type: http
     config:
-      body:
-        body: |
-          ## Code Review Overview
-
-          {{escape .id_45ba6ed637714a0d830946d8d0b2a4ec }}
-      expectedResponseCode: "201"
+      body: |-
+        {
+          "body": "## Code Review Comments",
+          "event": "COMMENT",
+          "comments": [{{ escape .id_fcda8acb414a47bdadcfd26b2ef03c6d }}]
+        }
+      expectedResponseCode: "200"
       failIfResponseEmpty: true
       headers:
         Accept: application/vnd.github.v3+json
@@ -119,7 +143,7 @@ actions:
         Content-Type: application/json
       method: POST
       responsePath: id
-      url: https://api.github.com/repos/{{ body "repository.full_name"}}/issues/{{ body "pull_request.number" }}/comments
+      url: https://api.github.com/repos/{{ body "repository.full_name"}}/pulls/{{ body "pull_request.number" }}/reviews
     next: action.id_299305ccde8b433080cf6b71f4d4daa3
     fail: ""
   id_98b99d56e76543fcba9d240e65f9ea8f:
@@ -129,7 +153,7 @@ actions:
       script: |-
         mkdir {{ .id_c5de23f72a5a41b4909de8f1f7f5b422.task_id }} && cd {{ .id_c5de23f72a5a41b4909de8f1f7f5b422.task_id }};
         git clone https://x-access-token:{{ .id_4499bbc9bf8946b6b6c9c7551a9bf2f4 }}@github.com/{{ body "repository.full_name"}}.git .
-    next: action.id_b9d515e8214d4dccb7af0029d90dfd07
+    next: action.id_4a806a7450194f50b1111162bc601d0c
     fail: ""
   id_517f7c83fd3749d6ab99407158dd0804:
     name: Delete folder
@@ -138,26 +162,29 @@ actions:
       script: rm -rf {{ .id_c5de23f72a5a41b4909de8f1f7f5b422.task_id }};
     next: ""
     fail: ""
-  id_894eb84c4a2b440f88a639cb9a6e9b7b:
-    name: Comment file
+  id_0776f13565ea488c82f5a822347f4cfb:
+    name: Dismiss Review
     type: http
     config:
-      body: |-
-        {
-          "body": "{{ escape ( tool_param "content" ) | js }}",
-          "path": "{{ tool_param "file" }}",
-          "commit_id": "{{ body "pull_request.head.sha" }}",
-          "line": {{ tool_param "line" }},
-          "side": "RIGHT"
-        }
-      expectedResponseCode: "201"
+      body:
+        event: DISMISS
+        message: You are dismissed
+      expectedResponseCode: "200"
       failIfResponseEmpty: true
       headers:
-        Accept: application/vnd.github.v3+json
+        Accept: application/vnd.github+json
         Authorization: token {{ .id_4499bbc9bf8946b6b6c9c7551a9bf2f4 }}
         Content-Type: application/json
-      method: POST
-      url: https://api.github.com/repos/{{ body "repository.full_name"}}/pulls/{{ body "pull_request.number" }}/comments
+      method: PUT
+      url: https://api.github.com/repos/{{ body "repository.full_name" }}/pulls/{{ body "pull_request.number" }}/reviews/{{ action "Get Review Key" }}/dismissals
+    next: action.id_81d46dff82d94fdba75ff06996275db3
+    fail: action.id_81d46dff82d94fdba75ff06996275db3
+  id_1301b53d5476476d9ac31d53189d0a77:
+    name: Get Review Key
+    type: get_key
+    config:
+      failIfEmpty: false
+      key: review_{{ body "pull_request.id" | tostring }}
     next: ""
     fail: ""
   id_4499bbc9bf8946b6b6c9c7551a9bf2f4:
@@ -172,26 +199,48 @@ actions:
     dispatch:
       - action.id_98b99d56e76543fcba9d240e65f9ea8f
   id_299305ccde8b433080cf6b71f4d4daa3:
-    name: Store Key
+    name: Store Review Key
     type: store_key
     config:
-      key: '{{ body "pull_request.head.sha" }}'
-      value: "{{ tostring .id_81d46dff82d94fdba75ff06996275db3 }}"
-    next: action.id_517f7c83fd3749d6ab99407158dd0804
-    fail: action.id_517f7c83fd3749d6ab99407158dd0804
+      key: review_{{ body "pull_request.id" | tostring }}
+      value: '{{ action "Comment Reviews" | tostring }}'
+    next: ""
+    fail: ""
   id_b9d515e8214d4dccb7af0029d90dfd07:
-    name: Get Key
+    name: Get Comment Key
     type: get_key
     config:
       failIfEmpty: false
-      key: '{{ body "pull_request.head.sha" }}'
-    next: action.id_4a806a7450194f50b1111162bc601d0c
+      key: comment_{{ body "pull_request.id" | tostring }}
+    next: ""
+    fail: ""
+  id_b88058262e71486085c64bd2f3a9d8a2:
+    name: SubAgent
+    type: agent
+    config:
+      integrationID: << .IntegrationID >>
+      returnLastMessage: true
+      systemPrompt: "You are a sub-agent in a CI review workflow. Your job is to validate and, if necessary, correct the file line number for GitHub PR comment_file actions. \n\nGiven:\n- The user's intended (old) line number.\n- The unified git diff of the file.\n- The file name (path).\n- The intended comment content.\n- The commit SHA.\n\nYour task:\n- Confirm if the intended line number is a valid line on the *right side* (post-change) of the diff.\n- If that line number is invalid (e.g., it falls into a deleted/unchanged section or points to an old line that's moved), recalculate the correct right-side (new) line in the diff that matches the original intent as closely as possible.\n- Output ONLY the new, valid right-side line number for the comment (as an integer). If the input line is already correct, return it unchanged (as integer).\n\nRequired output:\n- Just the mapped line number (integer), nothing else.\n\nExtra Guidance:\n- Account for diff hunks, added/deleted lines, and all necessary diff noise.\n- If you are uncertain and cannot resolve a line, output -1.\n\nExample:\n- If intended line is 20, but that is now at line 22 in the new file per the diff, output 22.\n- If intended line is 20 and is still at line 20 in the new file, output 20.\n- If line 20 was deleted in the patch, output -1.\n\nInput fields:\n- diff: unified diff text for the file\n- old_line: user's original line number (integer)\n- file: file path (string)\n- comment: intended comment content (string)\n- commit_id: commit SHA (string)\n\nNever output anything but the correct right-side line number (or -1).\n"
+      userPrompt: |
+        Task:
+        Given this diff:
+        {{ escape .id_4a806a7450194f50b1111162bc601d0c }}
+
+        The user's intended line: {{ tool_param "line" }}
+        File: {{ tool_param "file" }}
+        Comment: {{ tool_param "comment" }}
+
+        Validate and correct the line number for a PR code review comment so that it points to the correct right-hand line per the diff.
+
+        Output ONLY the new line number for the right-side file, or -1 if invalid.
+    next: conditional.id_168c7c297ef64b48a1f0adb16260795a
     fail: ""
   id_c1ac93bd7d534619b69fabf785979bf2:
     name: execute Command
-    type: command
+    type: shell
     config:
       command: cd {{ .id_c5de23f72a5a41b4909de8f1f7f5b422.task_id }} && {{ tool_param "command" }}
+      script: cd {{ .id_c5de23f72a5a41b4909de8f1f7f5b422.task_id }} && {{ tool_param "command" }}
     next: ""
     fail: ""
   id_c5de23f72a5a41b4909de8f1f7f5b422:
@@ -210,6 +259,26 @@ actions:
           return { task_id: uuidv4() };
         }
     next: action.id_4499bbc9bf8946b6b6c9c7551a9bf2f4
+    fail: response.id_9c6b47d123db4b898f3d2eabc7f209a0
+  id_ec1b9007238e48d5ab655fe6e9c71aa1:
+    name: Create Comment
+    type: http
+    config:
+      body:
+        body: |
+          ## Code Review Overview
+
+          {{escape .id_45ba6ed637714a0d830946d8d0b2a4ec }}
+      expectedResponseCode: "201"
+      failIfResponseEmpty: true
+      headers:
+        Accept: application/vnd.github.v3+json
+        Authorization: token {{ .id_4499bbc9bf8946b6b6c9c7551a9bf2f4 }}
+        Content-Type: application/json
+      method: POST
+      responsePath: id
+      url: https://api.github.com/repos/{{ body "repository.full_name"}}/issues/{{ body "pull_request.number" }}/comments
+    next: action.id_1e49aba472db4e8786ce0b89f73fbe7e
     fail: ""
   id_f2df3e4c914a494d81026a9c012d2ce0:
     name: Update Comment Overview
@@ -229,9 +298,50 @@ actions:
       method: PATCH
       responsePath: id
       url: https://api.github.com/repos/{{ body "repository.full_name"}}/issues/comments/{{ .id_b9d515e8214d4dccb7af0029d90dfd07 }}
-    next: action.id_517f7c83fd3749d6ab99407158dd0804
-    fail: action.id_517f7c83fd3749d6ab99407158dd0804
+    next: ""
+    fail: ""
+  id_f5acf38d47674a248701b53a1b7891be:
+    name: Has Review
+    type: static
+    config:
+      return: "yes"
+    next: ""
+    fail: ""
+  id_fcda8acb414a47bdadcfd26b2ef03c6d:
+    name: Store comment value
+    type: static
+    config:
+      return: |-
+        {{ if .id_fcda8acb414a47bdadcfd26b2ef03c6d }}{{ .id_fcda8acb414a47bdadcfd26b2ef03c6d }},{{ end }}
+        {
+          "body": "{{ escape ( tool_param "content" ) }}",
+          "path": "{{ tool_param "file" }}",
+          "line": {{ action "SubAgent" }},
+          "side": "RIGHT"
+        }
+    next: action.id_f5acf38d47674a248701b53a1b7891be
+    fail: ""
 conditionals:
+  id_25d7cf1e250048eb9b3ad56042f3bf64:
+    name: Has Review Comments
+    onTrue: conditional.id_f5c04ce064f84538be556c8131b8169d
+    onFalse: ""
+    expression: ""
+    structure:
+      - - content: .id_f5acf38d47674a248701b53a1b7891be
+          comparison: '"yes"'
+          function: eq
+          title: ""
+  id_168c7c297ef64b48a1f0adb16260795a:
+    name: Is Valid Line Number
+    onTrue: ""
+    onFalse: action.id_fcda8acb414a47bdadcfd26b2ef03c6d
+    expression: ""
+    structure:
+      - - content: .id_b88058262e71486085c64bd2f3a9d8a2
+          comparison: '"-1"'
+          function: eq
+          title: ""
   id_291c1247590c40009956dbc40bbec3d7:
     name: Is PR Action
     onTrue: action.id_c5de23f72a5a41b4909de8f1f7f5b422
@@ -253,10 +363,19 @@ conditionals:
   id_bfeb651b587747b9a5f01e849c597c10:
     name: Has Existing Comment
     onTrue: action.id_f2df3e4c914a494d81026a9c012d2ce0
+    onFalse: action.id_ec1b9007238e48d5ab655fe6e9c71aa1
+    expression: ""
+    structure:
+      - - content: action "Get Comment Key"
+          function: notempty
+          title: ""
+  id_f5c04ce064f84538be556c8131b8169d:
+    name: Has Existing Review
+    onTrue: action.id_0776f13565ea488c82f5a822347f4cfb
     onFalse: action.id_81d46dff82d94fdba75ff06996275db3
     expression: ""
     structure:
-      - - content: .id_b9d515e8214d4dccb7af0029d90dfd07
+      - - content: action "Get Review Key"
           function: notempty
           title: ""
 responses:
