@@ -1,0 +1,53 @@
+slug: github-ci
+name: GitHub CI Agent
+version: 2.0.0
+description: AI-powered code review agent for GitHub pull requests
+entry: main.ts
+
+# This plugin works with an already-created GitHub App. Create the App on GitHub
+# (with contents:read, pull_requests:write, metadata:read and the pull_request +
+# push events), point its webhook at <your-host><webhookPath>, then supply the
+# App's credentials below.
+fields:
+  - name: appId
+    label: GitHub App ID
+    description: Numeric App ID of your GitHub App (used as the JWT issuer)
+    type: text
+    required: true
+
+  - name: privateKey
+    label: Private Key (PEM)
+    description: >-
+      The GitHub App private key in PEM format. It is multiline, so load it from
+      a file: type @your-app.private-key.pem at the prompt, or pass
+      --set privateKey=@your-app.private-key.pem.
+    type: password
+    required: true
+
+  - name: webhookSecret
+    label: Webhook Secret
+    description: The webhook secret configured on the GitHub App
+    type: password
+    required: true
+
+  - name: webhookPath
+    label: Webhook Path
+    description: Path the GitHub App webhook is configured to POST to
+    type: text
+    required: true
+    default: /webhooks/github-ci
+
+  - name: integrationId
+    label: AI Integration ID
+    description: ID of the AI integration to use for code review
+    type: text
+    required: true
+
+  - name: instanceName
+    label: Instance Name
+    description: >-
+      Prefix for the secrets this install creates. Change it to run more than
+      one GitHub CI agent without name collisions.
+    type: text
+    required: true
+    default: github-ci
