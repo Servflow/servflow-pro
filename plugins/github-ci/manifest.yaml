@@ -1,14 +1,30 @@
 slug: github-ci
 name: GitHub CI Agent
-version: 2.0.0
+version: 3.0.0
 description: AI-powered code review agent for GitHub pull requests
 entry: main.ts
 
-# This plugin works with an already-created GitHub App. Create the App on GitHub
-# (with contents:read, pull_requests:write, metadata:read and the pull_request +
-# push events), point its webhook at <your-host><webhookPath>, then supply the
-# App's credentials below.
+# This plugin configures an already-created agent. Create the agent (and its
+# workspace) in the dashboard first, then install this plugin against it: it
+# stores the GitHub App credentials, builds the review workflow, attaches it to
+# the agent, and (optionally) seeds review guidelines into the agent's workspace.
+#
+# It works with an already-created GitHub App too. Create the App on GitHub (with
+# contents:read, pull_requests:write, metadata:read and the pull_request + push
+# events), point its webhook at <your-host><webhookPath>, then supply the App's
+# credentials below.
+# agentId and workspaceId are NOT declared here: the installer creates/selects the
+# agent and workspace up front and injects them as install context, so the plugin
+# reads them from installer.inputs() without prompting for them.
 fields:
+  - name: guidelines
+    label: Review Guidelines
+    description: >-
+      Optional Markdown file of code-review guidelines. If provided, it is written
+      to the agent's workspace as review-guidelines.md for the agent to consult.
+    type: file
+    required: false
+
   - name: appId
     label: GitHub App ID
     description: Numeric App ID of your GitHub App (used as the JWT issuer)
@@ -18,10 +34,9 @@ fields:
   - name: privateKey
     label: Private Key (PEM)
     description: >-
-      The GitHub App private key in PEM format. It is multiline, so load it from
-      a file: type @your-app.private-key.pem at the prompt, or pass
-      --set privateKey=@your-app.private-key.pem.
-    type: password
+      The GitHub App private key .pem file. The host reads its contents and stores
+      them as an encrypted secret; the contents are never exposed to the plugin.
+    type: file
     required: true
 
   - name: webhookSecret

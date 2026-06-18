@@ -191,7 +191,7 @@ actions:
     name: GitHub Installation Token
     type: github_token
     config:
-      client_id: '{{ secret "<< .AppIDSecret >>" }}'
+      client_id: '<< .AppID >>'
       installation_id: '{{ body "installation.id" }}'
       pem: '{{ escape (secret "<< .AppPEMSecret >>") }}'
     next: response.id_9c6b47d123db4b898f3d2eabc7f209a0

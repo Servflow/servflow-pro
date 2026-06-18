@@ -1,40 +1,57 @@
 // GitHub CI Agent installer.
 //
-// This installs the code-review agent against an *already-created* GitHub App.
-// The user supplies the App's credentials (App ID, private key, webhook secret);
-// we store them as secrets and stamp them into the workflow template. There is
-// no GitHub App manifest / OAuth callback flow — the host's interactive callback
-// machinery is intentionally not used here.
+// This configures the code-review agent against an *already-created* GitHub App
+// AND an *already-created* agent + workspace (both created in the dashboard). The
+// frontend owns agent/workspace creation; this plugin only:
+//   - stores the GitHub App credentials as secrets,
+//   - builds the review workflow and attaches it to the given agent, and
+//   - optionally seeds review guidelines into the agent's workspace.
 //
 // The App's installation ID is NOT collected: the workflow reads it from each
 // webhook payload at runtime (`{{ body "installation.id" }}`), so one install
 // serves every repository/installation of the App.
 
-import { installer, secrets, workflows, agents, files } from "servflow:sdk";
+import { installer, secrets, workflows, agents, workspaces, files } from "servflow:sdk";
 
-// Secret name suffixes, prefixed with the install's instanceName.
-const SUFFIX_APP_ID = "_app_id";
+// Secret name suffixes, prefixed with the install's instanceName. The App ID is
+// not sensitive (it is the JWT issuer, visible in the App's settings), so it is
+// inlined into the workflow rather than stored as a secret.
 const SUFFIX_APP_PEM = "_app_pem";
 const SUFFIX_WEBHOOK_SECRET = "_webhook_secret";
 
-console.error("GitHub CI Agent — collecting GitHub App credentials...");
+// Where guidelines land in the agent's workspace.
+const GUIDELINES_PATH = "review-guidelines.md";
 
-const { appId, privateKey, webhookSecret, webhookPath, integrationId, instanceName } =
-  await installer.requestInput([
-    { name: "appId", label: "GitHub App ID", type: "text", required: true },
-    { name: "privateKey", label: "Private Key (PEM)", type: "password", required: true },
-    { name: "webhookSecret", label: "Webhook Secret", type: "password", required: true },
-    { name: "webhookPath", label: "Webhook Path", type: "text", required: true, default: "/webhooks/github-ci" },
-    { name: "integrationId", label: "AI Integration ID", type: "text", required: true },
-    { name: "instanceName", label: "Instance Name", type: "text", required: true, default: "github-ci" },
-  ]);
+console.error("GitHub CI Agent — reading install inputs...");
+
+const {
+  agentId,
+  workspaceId,
+  guidelines,
+  appId,
+  privateKey,
+  webhookSecret,
+  webhookPath,
+  integrationId,
+  instanceName,
+} = await installer.inputs();
 
 // Validate inputs.
+if (!agentId || agentId.trim() === "") {
+  throw new Error("Agent ID is required");
+}
+const workspaceIdNum = Number(workspaceId);
+if (!workspaceId || !Number.isInteger(workspaceIdNum) || workspaceIdNum <= 0) {
+  throw new Error("Workspace ID is required and must be a positive integer");
+}
 if (!appId || !/^\d+$/.test(appId.trim())) {
   throw new Error("GitHub App ID is required and must be numeric");
 }
-if (!privateKey || !privateKey.includes("-----BEGIN")) {
-  throw new Error("Private Key must be a PEM-encoded key (load it from a file with @path, e.g. @your-app.private-key.pem)");
+// privateKey is a file field: the plugin receives only a reference, never the PEM
+// bytes, so it can only check that a file was supplied — the host reads and
+// stores the contents.
+if (!privateKey) {
+  throw new Error("Private Key (PEM) file is required");
 }
 if (!webhookSecret || webhookSecret.trim() === "") {
   throw new Error("Webhook Secret is required");
@@ -49,27 +66,40 @@ if (!instanceName || instanceName.trim() === "") {
   throw new Error("Instance Name is required");
 }
 
+if (!(await agents.exists(agentId.trim()))) {
+  throw new Error(`Agent ${agentId} does not exist — create it in the dashboard first`);
+}
+
 const prefix = instanceName.trim();
-const appIdSecretName = prefix + SUFFIX_APP_ID;
 const appPemSecretName = prefix + SUFFIX_APP_PEM;
 const webhookSecretName = prefix + SUFFIX_WEBHOOK_SECRET;
 
-// Store credentials as secrets. There is no secrets.update yet, so an existing
-// secret is reused as-is (a warning is logged); pick a different instanceName to
-// install a second agent or to rotate credentials cleanly.
-async function ensureSecret(name: string, value: string, description: string): Promise<void> {
+// Store credentials as secrets from their input references — the host reads the
+// content (the PEM file's bytes, the webhook secret's value) and stores it
+// encrypted; the plaintext never enters this plugin. There is no secrets.update
+// yet, so an existing secret is reused as-is (a warning is logged); pick a
+// different instanceName to install a second agent or rotate credentials.
+async function ensureSecret(name: string, ref: string, description: string): Promise<void> {
   if (await secrets.exists(name)) {
     console.error(`Secret ${name} already exists — keeping its current value.`);
     return;
   }
-  await secrets.create(name, value, description);
+  await secrets.create(name, ref, description);
   console.error(`Stored secret ${name}.`);
 }
 
 console.error("Storing GitHub App credentials...");
-await ensureSecret(appIdSecretName, appId.trim(), `GitHub App ID for ${prefix}`);
 await ensureSecret(appPemSecretName, privateKey, `GitHub App private key (PEM) for ${prefix}`);
 await ensureSecret(webhookSecretName, webhookSecret, `GitHub App webhook secret for ${prefix}`);
+
+// Optionally seed review guidelines into the agent's workspace. `guidelines` is
+// a file-field reference; the host opens the file and writes its bytes — the
+// plugin never handles the bytes itself.
+if (guidelines) {
+  console.error(`Writing review guidelines to workspace ${workspaceIdNum}...`);
+  await workspaces.createEntry(workspaceIdNum, GUIDELINES_PATH, guidelines);
+  console.error(`Wrote ${GUIDELINES_PATH}.`);
+}
 
 // Stamp the workflow template with this install's values.
 console.error("Building workflow from template...");
@@ -77,27 +107,22 @@ let workflowYaml = await files.read("workflows/github-ci.yaml");
 workflowYaml = workflowYaml
   .replace(/<< \.WebhookPath >>/g, webhookPath)
   .replace(/<< \.IntegrationID >>/g, integrationId)
-  .replace(/<< \.AppIDSecret >>/g, appIdSecretName)
+  .replace(/<< \.AppID >>/g, appId.trim())
   .replace(/<< \.AppPEMSecret >>/g, appPemSecretName)
   .replace(/<< \.WebhookSecretName >>/g, webhookSecretName);
 
 const workflowId = await workflows.create("GitHub CI Agent", workflowYaml, true);
 console.error(`Workflow created: ${workflowId}`);
 
-// Create the agent and attach the workflow as its webhook entrypoint.
-const agentId = await agents.create(
-  "GitHub CI Agent",
-  "AI-powered code review agent for GitHub pull requests",
-  "default",
-);
-await agents.addConfig(agentId, workflowId, "webhook");
+// Attach the workflow to the existing agent as its webhook entrypoint.
+await agents.addConfig(agentId.trim(), workflowId, "webhook");
 
 console.error("");
 console.error("=".repeat(50));
 console.error("GitHub CI Agent installed successfully!");
 console.error("=".repeat(50));
-console.error(`  Workflow ID: ${workflowId}`);
 console.error(`  Agent ID:    ${agentId}`);
+console.error(`  Workflow ID: ${workflowId}`);
 console.error(`  Webhook URL: <your-host>${webhookPath}`);
 console.error("");
 console.error("Next steps:");
