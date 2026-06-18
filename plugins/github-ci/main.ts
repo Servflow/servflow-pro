@@ -34,7 +34,7 @@ const {
   webhookPath,
   integrationId,
   instanceName,
-} = await installer.inputs();
+} = installer.inputs();
 
 // Validate inputs.
 if (!agentId || agentId.trim() === "") {
@@ -66,7 +66,7 @@ if (!instanceName || instanceName.trim() === "") {
   throw new Error("Instance Name is required");
 }
 
-if (!(await agents.exists(agentId.trim()))) {
+if (!agents.exists(agentId.trim())) {
   throw new Error(`Agent ${agentId} does not exist — create it in the dashboard first`);
 }
 
@@ -79,31 +79,31 @@ const webhookSecretName = prefix + SUFFIX_WEBHOOK_SECRET;
 // encrypted; the plaintext never enters this plugin. There is no secrets.update
 // yet, so an existing secret is reused as-is (a warning is logged); pick a
 // different instanceName to install a second agent or rotate credentials.
-async function ensureSecret(name: string, ref: string, description: string): Promise<void> {
-  if (await secrets.exists(name)) {
+function ensureSecret(name: string, ref: string, description: string): void {
+  if (secrets.exists(name)) {
     console.error(`Secret ${name} already exists — keeping its current value.`);
     return;
   }
-  await secrets.create(name, ref, description);
+  secrets.create(name, ref, description);
   console.error(`Stored secret ${name}.`);
 }
 
 console.error("Storing GitHub App credentials...");
-await ensureSecret(appPemSecretName, privateKey, `GitHub App private key (PEM) for ${prefix}`);
-await ensureSecret(webhookSecretName, webhookSecret, `GitHub App webhook secret for ${prefix}`);
+ensureSecret(appPemSecretName, privateKey, `GitHub App private key (PEM) for ${prefix}`);
+ensureSecret(webhookSecretName, webhookSecret, `GitHub App webhook secret for ${prefix}`);
 
 // Optionally seed review guidelines into the agent's workspace. `guidelines` is
 // a file-field reference; the host opens the file and writes its bytes — the
 // plugin never handles the bytes itself.
 if (guidelines) {
   console.error(`Writing review guidelines to workspace ${workspaceIdNum}...`);
-  await workspaces.createEntry(workspaceIdNum, GUIDELINES_PATH, guidelines);
+  workspaces.createEntry(workspaceIdNum, GUIDELINES_PATH, guidelines);
   console.error(`Wrote ${GUIDELINES_PATH}.`);
 }
 
 // Stamp the workflow template with this install's values.
 console.error("Building workflow from template...");
-let workflowYaml = await files.read("workflows/github-ci.yaml");
+let workflowYaml = files.read("workflows/github-ci.yaml");
 workflowYaml = workflowYaml
   .replace(/<< \.WebhookPath >>/g, webhookPath)
   .replace(/<< \.IntegrationID >>/g, integrationId)
@@ -111,11 +111,11 @@ workflowYaml = workflowYaml
   .replace(/<< \.AppPEMSecret >>/g, appPemSecretName)
   .replace(/<< \.WebhookSecretName >>/g, webhookSecretName);
 
-const workflowId = await workflows.create("GitHub CI Agent", workflowYaml, true);
+const workflowId = workflows.create("GitHub CI Agent", workflowYaml, true);
 console.error(`Workflow created: ${workflowId}`);
 
 // Attach the workflow to the existing agent as its webhook entrypoint.
-await agents.addConfig(agentId.trim(), workflowId, "webhook");
+agents.addConfig(agentId.trim(), workflowId, "webhook");
 
 console.error("");
 console.error("=".repeat(50));
