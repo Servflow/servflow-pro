@@ -1,6 +1,6 @@
 slug: github-ci
 name: GitHub CI Agent
-version: 3.0.0
+version: 3.1.0
 description: AI-powered code review agent for GitHub pull requests
 entry: main.ts
 
@@ -52,12 +52,6 @@ fields:
     required: true
     default: /webhooks/github-ci
 
-  - name: integrationId
-    label: AI Integration ID
-    description: ID of the AI integration to use for code review
-    type: text
-    required: true
-
   - name: instanceName
     label: Instance Name
     description: >-
@@ -66,3 +60,15 @@ fields:
     type: text
     required: true
     default: github-ci
+
+# Integrations this plugin needs in order to run. Unlike a field, an integration
+# is a first-class resource: the caller (CLI/UI) picks an existing AI integration
+# or creates one before the plugin runs, then passes its id in. The plugin reads
+# the resolved id via installer.integrations() and drops it into the review
+# workflow's agent actions — it never collects the AI credentials itself.
+integrations:
+  - key: ai
+    label: AI Integration
+    description: The AI integration the review agent uses to analyze pull requests.
+    group: ai
+    required: true

@@ -1,4 +1,10 @@
-// GitHub CI Agent installer.
+// GitHub CI Agent installer — plain-JavaScript equivalent of main.ts.
+//
+// The host accepts either a .ts or a .js entrypoint (see manifest `entry`): both
+// are transpiled/bundled by esbuild and run on the in-process goja runtime. This
+// file is the same installer as main.ts with the TypeScript types removed, kept
+// as a reference for authoring plugins in plain JavaScript. To ship the JS
+// version instead, set `entry: main.js` in manifest.yaml.
 //
 // This configures the code-review agent against an *already-created* GitHub App
 // AND an *already-created* agent + workspace (both created in the dashboard). The
@@ -84,7 +90,7 @@ const webhookSecretName = prefix + SUFFIX_WEBHOOK_SECRET;
 // encrypted; the plaintext never enters this plugin. There is no secrets.update
 // yet, so an existing secret is reused as-is (a warning is logged); pick a
 // different instanceName to install a second agent or rotate credentials.
-function ensureSecret(name: string, ref: string, description: string): void {
+function ensureSecret(name, ref, description) {
   if (secrets.exists(name)) {
     console.error(`Secret ${name} already exists — keeping its current value.`);
     return;
