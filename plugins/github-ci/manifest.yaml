@@ -1,30 +1,34 @@
 slug: github-ci
-name: GitHub CI Agent
-version: 3.1.0
-description: AI-powered code review agent for GitHub pull requests
+name: GitHub PR Reviewer
+version: 4.0.0
+description: AI-powered pull request reviewer and responder for GitHub
 entry: main.ts
 
-# This plugin configures an already-created agent. Create the agent (and its
-# workspace) in the dashboard first, then install this plugin against it: it
-# stores the GitHub App credentials, builds the review workflow, attaches it to
-# the agent, and (optionally) seeds review guidelines into the agent's workspace.
+# This plugin configures an already-created agent. Create the agent in the
+# dashboard first, then install this plugin against it: it stores the GitHub App
+# credentials, builds the four review workflows, and attaches them to the agent.
+# No workspace is needed — the bot is HTTP-only (it reviews the PR diff and
+# conversation via the GitHub API and never clones the repo).
 #
-# It works with an already-created GitHub App too. Create the App on GitHub (with
-# contents:read, pull_requests:write, metadata:read and the pull_request + push
-# events), point its webhook at <your-host><webhookPath>, then supply the App's
-# credentials below.
-# agentId and workspaceId are NOT declared here: the installer creates/selects the
-# agent and workspace up front and injects them as install context, so the plugin
-# reads them from installer.inputs() without prompting for them.
+# It works with an already-created GitHub App too. Create the App on GitHub with
+# pull_requests:read/write, issues:read/write, contents:read, metadata:read and
+# the "Pull request" + "Issue comment" webhook events, point its webhook at
+# <your-host><webhookPath>, then supply the App's credentials below.
+#
+# What gets installed (all prefixed with instanceName):
+#   <instance>-webhook        HTTP entrypoint. Webhook signatures are verified by
+#                             the host's `github_webhook` entry handler BEFORE the
+#                             workflow runs; requires a ServFlow Pro build that
+#                             ships that handler.
+#   <instance>-review         Posts an upserted "PR Overview" comment + a grouped
+#                             review with inline comments on PR open/synchronize.
+#   <instance>-respond        Replies when a PR comment mentions @servflow.
+#   <instance>-fetch-context  Shared diff/metadata/conversation fetcher.
+#
+# agentId is NOT declared here: the installer creates/selects the agent up front
+# and injects it as install context, so the plugin reads it from
+# installer.inputs() without prompting for it.
 fields:
-  - name: guidelines
-    label: Review Guidelines
-    description: >-
-      Optional Markdown file of code-review guidelines. If provided, it is written
-      to the agent's workspace as review-guidelines.md for the agent to consult.
-    type: file
-    required: false
-
   - name: appId
     label: GitHub App ID
     description: Numeric App ID of your GitHub App (used as the JWT issuer)
@@ -55,8 +59,8 @@ fields:
   - name: instanceName
     label: Instance Name
     description: >-
-      Prefix for the secrets this install creates. Change it to run more than
-      one GitHub CI agent without name collisions.
+      Prefix for the secrets and workflow ids this install creates. Change it to
+      run more than one PR reviewer without name collisions.
     type: text
     required: true
     default: github-ci
@@ -65,10 +69,10 @@ fields:
 # is a first-class resource: the caller (CLI/UI) picks an existing AI integration
 # or creates one before the plugin runs, then passes its id in. The plugin reads
 # the resolved id via installer.integrations() and drops it into the review
-# workflow's agent actions — it never collects the AI credentials itself.
+# workflows' agent actions — it never collects the AI credentials itself.
 integrations:
   - key: ai
     label: AI Integration
-    description: The AI integration the review agent uses to analyze pull requests.
+    description: The AI integration the review and responder agents use.
     group: ai
     required: true

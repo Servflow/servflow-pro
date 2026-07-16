@@ -1,0 +1,88 @@
+# Conversational responder (trigger, run in the background by the webhook's
+# dispatch when a PR comment mentions the bot). Replies with an issue comment,
+# grounded on the diff + full conversation.
+#
+# Placeholders stamped by main.ts at install time:
+#   << .Prefix >>       — instance name; config_id prefix + callworkflow refs.
+#   << .AppID >>        — GitHub App ID (JWT issuer, not sensitive, inlined).
+#   << .AppPEMSecret >> — name of the secret holding the App's private key PEM.
+#   << .IntegrationID >> — the AI integration the agent uses.
+enabled: true
+trigger:
+    enabled: true
+    cron: ""
+    next: action.auth
+    result: '{"status":"responded"}'
+name: << .Prefix >>-respond
+id: << .Prefix >>-respond
+actions:
+    auth:
+        name: Auth
+        type: github_token
+        config:
+            client_id: '<< .AppID >>'
+            installation_id: '{{ input "installation_id" }}'
+            pem: '{{ escape (secret "<< .AppPEMSecret >>") }}'
+            permissions:
+                contents: read
+                pull_requests: write
+            repositories: []
+        next: action.fetch
+        fail: ""
+    fetch:
+        name: Fetch Context
+        type: callworkflow
+        config:
+            inputs:
+                pr_number: '{{ input "pr_number" }}'
+                repo: '{{ input "repo" }}'
+                token: '{{ .auth }}'
+            workflowID: << .Prefix >>-fetch-context
+        next: action.respond_agent
+        fail: ""
+    post_reply:
+        name: Post Reply
+        type: http
+        config:
+            body:
+                body: '{{ escape (tostring (action "Respond Agent")) }}'
+            expectedResponseCode: "201"
+            headers:
+                Accept: application/vnd.github.v3+json
+                Authorization: token {{ .auth }}
+                Content-Type: application/json
+            method: POST
+            responsePath: id
+            url: https://api.github.com/repos/{{ input "repo" }}/issues/{{ input "pr_number" }}/comments
+        next: ""
+        fail: ""
+    respond_agent:
+        name: Respond Agent
+        type: agent
+        config:
+            integrationID: << .IntegrationID >>
+            returnLastMessage: true
+            systemPrompt: You reply to a comment on a GitHub pull request. Use the PR diff and the full conversation for context. Be concise and helpful. Your text reply is posted as a comment.
+            userPrompt: |
+                Triggering comment:
+                {{ escape (tostring (input "comment_body")) }}
+
+                PR diff:
+                {{ escape (tostring .fetch.diff) }}
+
+                Conversation so far:
+                issue_comments: {{ escape (jsonout .fetch.issue_comments) }}
+                review_comments: {{ escape (jsonout .fetch.review_comments) }}
+                reviews: {{ escape (jsonout .fetch.reviews) }}
+        next: action.post_reply
+        fail: ""
+http:
+    listenPath: ""
+    method: ""
+    next: ""
+mcpTool:
+    enabled: false
+    name: ""
+    description: ""
+    result: ""
+    start: ""

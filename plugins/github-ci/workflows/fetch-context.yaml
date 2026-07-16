@@ -1,0 +1,86 @@
+# Shared context fetcher (trigger sub-workflow). Called by the review and
+# respond workflows via callworkflow; returns a JSON bundle of the PR's diff,
+# metadata, and full conversation. Auth: callers mint an installation token and
+# pass it as the `token` input.
+#
+# Placeholders stamped by main.ts at install time:
+#   << .Prefix >> — instance name; becomes the config_id prefix.
+enabled: true
+trigger:
+    enabled: true
+    cron: ""
+    next: action.ic
+    result: '{ "issue_comments": {{ jsonout .ic }}, "review_comments": {{ jsonout .rc }}, "reviews": {{ jsonout .rv }}, "diff": "{{ escape (tostring .diff) }}", "pr_title": "{{ escape (tostring .meta.title) }}", "pr_body": "{{ escape (tostring .meta.body) }}", "commit_id": "{{ escape (tostring .meta.head.sha) }}" }'
+name: << .Prefix >>-fetch-context
+id: << .Prefix >>-fetch-context
+actions:
+    diff:
+        name: PR Diff
+        type: http
+        config:
+            failIfResponseEmpty: false
+            headers:
+                Accept: application/vnd.github.v3.diff
+                Authorization: token {{ input "token" }}
+            method: GET
+            url: https://api.github.com/repos/{{ input "repo" }}/pulls/{{ input "pr_number" }}
+        next: ""
+        fail: ""
+    ic:
+        name: Issue Comments
+        type: http
+        config:
+            failIfResponseEmpty: false
+            headers:
+                Accept: application/vnd.github+json
+                Authorization: token {{ input "token" }}
+            method: GET
+            url: https://api.github.com/repos/{{ input "repo" }}/issues/{{ input "pr_number" }}/comments?per_page=100
+        next: action.rc
+        fail: ""
+    meta:
+        name: PR Meta
+        type: http
+        config:
+            failIfResponseEmpty: false
+            headers:
+                Accept: application/vnd.github+json
+                Authorization: token {{ input "token" }}
+            method: GET
+            url: https://api.github.com/repos/{{ input "repo" }}/pulls/{{ input "pr_number" }}
+        next: action.diff
+        fail: ""
+    rc:
+        name: Review Comments
+        type: http
+        config:
+            failIfResponseEmpty: false
+            headers:
+                Accept: application/vnd.github+json
+                Authorization: token {{ input "token" }}
+            method: GET
+            url: https://api.github.com/repos/{{ input "repo" }}/pulls/{{ input "pr_number" }}/comments?per_page=100
+        next: action.rv
+        fail: ""
+    rv:
+        name: Reviews
+        type: http
+        config:
+            failIfResponseEmpty: false
+            headers:
+                Accept: application/vnd.github+json
+                Authorization: token {{ input "token" }}
+            method: GET
+            url: https://api.github.com/repos/{{ input "repo" }}/pulls/{{ input "pr_number" }}/reviews?per_page=100
+        next: action.meta
+        fail: ""
+http:
+    listenPath: ""
+    method: ""
+    next: ""
+mcpTool:
+    enabled: false
+    name: ""
+    description: ""
+    result: ""
+    start: ""

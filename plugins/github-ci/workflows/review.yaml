@@ -1,0 +1,271 @@
+# PR review workflow (trigger, run in the background by the webhook's dispatch).
+# Posts/edits a "## PR Overview" issue comment (upserted every run) and a fresh
+# grouped review with inline comments (prior review dismissed best-effort).
+# Grounded ONLY on the diff + conversation — never clones the repo.
+#
+# Placeholders stamped by main.ts at install time:
+#   << .Prefix >>       — instance name; config_id prefix + callworkflow refs.
+#   << .AppID >>        — GitHub App ID (JWT issuer, not sensitive, inlined).
+#   << .AppPEMSecret >> — name of the secret holding the App's private key PEM.
+#   << .IntegrationID >> — the AI integration the agents use.
+enabled: true
+trigger:
+    enabled: true
+    cron: ""
+    next: action.auth
+    result: '{"status":"reviewed"}'
+name: << .Prefix >>-review
+id: << .Prefix >>-review
+actions:
+    accumulate:
+        name: Accumulate Comment
+        type: static
+        config:
+            return: '{{ if .accumulate }}{{ .accumulate }},{{ end }}{"path":"{{ tool_param "file" }}","line":{{ tool_param "line" }},"side":"RIGHT","body":"{{ escape (tostring (tool_param "content")) }}"}'
+        next: ""
+        fail: ""
+    assemble_review:
+        name: Assemble Review
+        type: javascript
+        config:
+            dependencies: ""
+            script: |
+                function servflowRun(vars, requestBody, params) {
+                  var body = "{{ escape (tostring (action \"Review Agent\")) }}";
+                  var commentsStr = "{{ escape (tostring .accumulate) }}";
+                  var commit = "{{ escape (tostring .fetch.commit_id) }}";
+                  var comments = [];
+                  if (commentsStr && commentsStr.length > 0) {
+                    try { comments = JSON.parse("[" + commentsStr + "]"); } catch (e) { comments = []; }
+                  }
+                  if (!body || body.length === 0) {
+                    body = "Automated review: no issues found in this diff.";
+                  }
+                  var payload = { event: "COMMENT", commit_id: commit, body: body, comments: comments };
+                  return { payload: JSON.stringify(payload) };
+                }
+        next: action.post_review
+        fail: ""
+    auth:
+        name: Auth
+        type: github_token
+        config:
+            client_id: '<< .AppID >>'
+            installation_id: '{{ input "installation_id" }}'
+            pem: '{{ escape (secret "<< .AppPEMSecret >>") }}'
+            permissions:
+                contents: read
+                pull_requests: write
+            repositories: []
+        next: action.fetch
+        fail: ""
+    dismiss:
+        name: Dismiss Prior Review
+        type: http
+        config:
+            body:
+                event: DISMISS
+                message: Superseded by a new automated review.
+            headers:
+                Accept: application/vnd.github+json
+                Authorization: token {{ .auth }}
+                Content-Type: application/json
+            method: PUT
+            url: https://api.github.com/repos/{{ input "repo" }}/pulls/{{ input "pr_number" }}/reviews/{{ .get_review }}/dismissals
+        next: action.review_agent
+        fail: action.review_agent
+    fetch:
+        name: Fetch Context
+        type: callworkflow
+        config:
+            inputs:
+                pr_number: '{{ input "pr_number" }}'
+                repo: '{{ input "repo" }}'
+                token: '{{ .auth }}'
+            workflowID: << .Prefix >>-fetch-context
+        next: action.overview_agent
+        fail: ""
+    get_overview:
+        name: Get Overview Key
+        type: get_key
+        config:
+            failIfEmpty: false
+            key: overview_{{ input "pr_id" }}
+        next: conditional.overview_exists
+        fail: conditional.overview_exists
+    get_review:
+        name: Get Review Key
+        type: get_key
+        config:
+            failIfEmpty: false
+            key: review_{{ input "pr_id" }}
+        next: conditional.has_review
+        fail: conditional.has_review
+    overview_agent:
+        name: Overview Agent
+        type: agent
+        config:
+            integrationID: << .IntegrationID >>
+            returnLastMessage: true
+            systemPrompt: |-
+                You write a concise overview of a GitHub pull request to help a human reviewer get oriented before they read the code. You are given the PR title, the PR description, and the unified DIFF.
+
+                Write a short overview with these markdown sections (omit a section if it has nothing):
+                - **Summary** — what this PR does, in 1-2 sentences.
+                - **Architectural changes** — new or removed components, changed interfaces/data flow, new dependencies, structural refactors.
+                - **Functional / behavioral changes** — user- or API-visible behavior that changes, new endpoints/flags/config, migrations.
+                - **Worth a careful look** — the few places most deserving reviewer attention (largest or riskiest changes).
+
+                Rules:
+                - This is an ORIENTATION overview, NOT a code review. Do not critique, approve, or leave line-level findings.
+                - Base it ONLY on the title, description, and diff you are given. Do not invent files or behavior you cannot see.
+                - Be concise and specific: name the actual files/modules from the diff rather than speaking in generalities.
+            userPrompt: |
+                PR title: {{ escape (tostring .fetch.pr_title) }}
+
+                PR description:
+                {{ escape (tostring .fetch.pr_body) }}
+
+                Unified diff:
+                {{ escape (tostring .fetch.diff) }}
+        next: action.get_overview
+        fail: action.get_review
+    patch_overview:
+        name: Edit Overview
+        type: http
+        config:
+            body:
+                body: |
+                    ## PR Overview
+
+                    {{ escape (tostring (action "Overview Agent")) }}
+            headers:
+                Accept: application/vnd.github.v3+json
+                Authorization: token {{ .auth }}
+                Content-Type: application/json
+            method: PATCH
+            url: https://api.github.com/repos/{{ input "repo" }}/issues/comments/{{ .get_overview }}
+        next: action.get_review
+        fail: action.get_review
+    post_overview:
+        name: Post Overview
+        type: http
+        config:
+            body:
+                body: |
+                    ## PR Overview
+
+                    {{ escape (tostring (action "Overview Agent")) }}
+            expectedResponseCode: "201"
+            headers:
+                Accept: application/vnd.github.v3+json
+                Authorization: token {{ .auth }}
+                Content-Type: application/json
+            method: POST
+            responsePath: id
+            url: https://api.github.com/repos/{{ input "repo" }}/issues/{{ input "pr_number" }}/comments
+        next: action.store_overview
+        fail: action.get_review
+    post_review:
+        name: Post Review
+        type: http
+        config:
+            body: '{{ tostring .assemble_review.payload }}'
+            expectedResponseCode: "200"
+            headers:
+                Accept: application/vnd.github.v3+json
+                Authorization: token {{ .auth }}
+                Content-Type: application/json
+            method: POST
+            responsePath: id
+            url: https://api.github.com/repos/{{ input "repo" }}/pulls/{{ input "pr_number" }}/reviews
+        next: action.store_review
+        fail: ""
+    review_agent:
+        name: Review Agent
+        type: agent
+        config:
+            integrationID: << .IntegrationID >>
+            returnLastMessage: true
+            systemPrompt: |-
+                You perform a detailed, per-file code review of a GitHub pull request. You are given the unified DIFF and the full PR CONVERSATION (issue comments, review comments, prior reviews).
+
+                How to review:
+                - Base your review ONLY on the diff and conversation. Do not assume files or code you cannot see.
+                - RESPECT prior dispositions: if the conversation shows a maintainer waived, accepted, or asked to ignore a finding, do NOT raise it again.
+                - For EVERY specific, line-level finding, call comment_file(file, line, content) once — use the exact file path and the right-side (new) line number from the diff. Keep each inline comment focused on that single line or hunk.
+                - Your final text reply is the REVIEW SUMMARY that ties the inline comments together, organised PER FILE: for each file you flagged, a short `### path` heading followed by a sentence or two on what changed there and the issues you raised; then any cross-cutting notes at the end.
+                - If you found NO issues, do NOT fabricate any: write a brief summary that clearly states no issues were found, with a one-line note on what you reviewed.
+                - Never put a line-level finding ONLY in the summary — each must also be a comment_file call.
+            toolConfigs:
+                - mcpConfig:
+                    endpoint: ""
+                  type: workflow
+                  workflowConfig:
+                    description: Leave one inline review comment on a changed file line.
+                    name: comment_file
+                    params:
+                        - file
+                        - line
+                        - content
+                    returnFile:
+                        identifier: ""
+                        type: ""
+                    returnValue: ""
+                    start: action.accumulate
+                    type: string
+            userPrompt: |
+                PR diff:
+                {{ escape (tostring .fetch.diff) }}
+
+                Conversation so far:
+                issue_comments: {{ escape (jsonout .fetch.issue_comments) }}
+                review_comments: {{ escape (jsonout .fetch.review_comments) }}
+                reviews: {{ escape (jsonout .fetch.reviews) }}
+        next: action.assemble_review
+        fail: ""
+    store_overview:
+        name: Store Overview Key
+        type: store_key
+        config:
+            key: overview_{{ input "pr_id" }}
+            value: '{{ action "Post Overview" | tostring }}'
+        next: action.get_review
+        fail: action.get_review
+    store_review:
+        name: Store Review Key
+        type: store_key
+        config:
+            key: review_{{ input "pr_id" }}
+            value: '{{ action "Post Review" | tostring }}'
+        next: ""
+        fail: ""
+conditionals:
+    has_review:
+        name: Has Prior Review
+        onTrue: action.dismiss
+        onFalse: action.review_agent
+        expression: ""
+        structure:
+            - - content: .get_review
+                function: notempty
+                title: ""
+    overview_exists:
+        name: Overview Exists
+        onTrue: action.patch_overview
+        onFalse: action.post_overview
+        expression: ""
+        structure:
+            - - content: .get_overview
+                function: notempty
+                title: ""
+http:
+    listenPath: ""
+    method: ""
+    next: ""
+mcpTool:
+    enabled: false
+    name: ""
+    description: ""
+    result: ""
+    start: ""

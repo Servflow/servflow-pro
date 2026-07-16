@@ -1,0 +1,160 @@
+# Webhook entrypoint (http). Signature verification happens BEFORE this plan
+# runs, in the `github_webhook` entry handler (HMAC-SHA256 over the raw body;
+# 401 on mismatch). The handler also injects the normalized `github` object
+# ({{ .github.event }}, {{ .github.pr_number }}, {{ .github.comment_body }})
+# used by the routing conditionals below.
+#
+# Routing: pull_request opened/synchronize → dispatch the review workflow;
+# issue_comment created + @mention (non-bot) → dispatch the responder. Both
+# dispatches run in the background; the webhook acks 202 immediately.
+#
+# Placeholders stamped by main.ts at install time:
+#   << .Prefix >>            — instance name; config_id prefix + callworkflow refs.
+#   << .WebhookPath >>       — path the GitHub App webhook POSTs to.
+#   << .WebhookSecretName >> — name of the secret holding the webhook secret.
+enabled: true
+trigger:
+    enabled: false
+    cron: ""
+    next: ""
+    result: ""
+name: << .Prefix >>-webhook
+id: << .Prefix >>-webhook
+actions:
+    ack_respond:
+        name: Ack Respond
+        type: static
+        config:
+            return: ok
+        next: response.accepted
+        fail: ""
+        dispatch:
+            - action.dispatch_respond
+    ack_review:
+        name: Ack Review
+        type: static
+        config:
+            return: ok
+        next: response.accepted
+        fail: ""
+        dispatch:
+            - conditional.is_pr_event
+    check_mention:
+        name: Check Mention
+        type: javascript
+        config:
+            dependencies: ""
+            script: |-
+                function servflowRun(vars, requestBody, params) {
+                  var commentBody = "{{ body "comment.body" }}";
+                  var userType = "{{ body "comment.user.type" }}";
+                  return { mention: commentBody.indexOf("@servflow") !== -1 && userType !== "Bot" };
+                }
+        next: conditional.should_respond
+        fail: response.ignored
+    dispatch_respond:
+        name: Dispatch Respond
+        type: callworkflow
+        config:
+            inputs:
+                comment_body: '{{ .github.comment_body }}'
+                installation_id: '{{ body "installation.id" }}'
+                pr_number: '{{ .github.pr_number }}'
+                repo: '{{ body "repository.full_name" }}'
+            workflowID: << .Prefix >>-respond
+        next: ""
+        fail: ""
+    dispatch_review:
+        name: Dispatch Review
+        type: callworkflow
+        config:
+            inputs:
+                installation_id: '{{ body "installation.id" }}'
+                pr_id: '{{ body "pull_request.id" }}'
+                pr_number: '{{ .github.pr_number }}'
+                repo: '{{ body "repository.full_name" }}'
+            workflowID: << .Prefix >>-review
+        next: ""
+        fail: ""
+conditionals:
+    is_comment:
+        name: Is Comment Created
+        onTrue: action.check_mention
+        onFalse: response.ignored
+        expression: ""
+        structure:
+            - - content: .github.event
+                comparison: '"issue_comment"'
+                function: eq
+                title: ""
+              - content: body "action"
+                comparison: '"created"'
+                function: eq
+                title: ""
+    is_pr_event:
+        name: Is PR Event
+        onTrue: action.dispatch_review
+        onFalse: conditional.is_comment
+        expression: ""
+        structure:
+            - - content: .github.event
+                comparison: '"pull_request"'
+                function: eq
+                title: ""
+              - content: body "action"
+                comparison: '"opened"'
+                function: eq
+                title: ""
+            - - content: .github.event
+                comparison: '"pull_request"'
+                function: eq
+                title: ""
+              - content: body "action"
+                comparison: '"synchronize"'
+                function: eq
+                title: ""
+    should_respond:
+        name: Should Respond
+        onTrue: action.ack_respond
+        onFalse: response.ignored
+        expression: ""
+        structure:
+            - - content: .check_mention.mention
+                comparison: "true"
+                function: eq
+                title: ""
+responses:
+    accepted:
+        name: Accepted
+        code: 202
+        template: '{"status":"accepted"}'
+        type: template
+        responseObject:
+            value: ""
+        file:
+            type: ""
+            identifier: ""
+    ignored:
+        name: Ignored
+        code: 200
+        template: '{"status":"ignored"}'
+        type: template
+        responseObject:
+            value: ""
+        file:
+            type: ""
+            identifier: ""
+http:
+    listenPath: << .WebhookPath >>
+    method: POST
+    next: action.ack_review
+    handler: github_webhook
+    handlerConfig:
+        secret: '{{ escape (secret "<< .WebhookSecretName >>") }}'
+        signature_header: X-Hub-Signature-256
+mcpTool:
+    enabled: false
+    name: ""
+    description: ""
+    result: ""
+    start: ""
