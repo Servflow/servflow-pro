@@ -1,4 +1,4 @@
-# ServFlow Pro
+# ServflowAI
 
 <p align="center">
   <strong>A powerful API workflow orchestration platform for building, managing, and executing complex API workflows with ease.</strong>
@@ -18,7 +18,7 @@
 
 ## Overview
 
-ServFlow Pro is an advanced API workflow orchestration platform that enables you to design, deploy, and manage complex API workflows. It provides a visual workflow builder, scheduled job execution, integrations with popular services, and enterprise-grade features for production environments.
+ServflowAI is an advanced API workflow orchestration platform that enables you to design, deploy, and manage complex API workflows. It provides a visual workflow builder, scheduled job execution, integrations with popular services, and enterprise-grade features for production environments.
 
 ## Features
 
@@ -39,11 +39,11 @@ The fastest way to get started:
 
 ```bash
 # Using Docker
-docker run -p 8080:8080 -p 3000:3000 servflow/servflow-pro
+docker run -p 8080:8080 -p 3000:3000 servflow/servflowai
 
 # Or using Homebrew (macOS/Linux)
-brew install Servflow/servflow/servflow-pro
-servflow-pro start --config config.toml --dashboard
+brew install Servflow/servflow/servflowai
+servflowai start --config config.toml --dashboard
 ```
 
 Access the dashboard at `http://localhost:3000`
@@ -53,13 +53,13 @@ Access the dashboard at `http://localhost:3000`
 ### Homebrew (macOS / Linux)
 
 ```bash
-brew install Servflow/servflow/servflow-pro
+brew install Servflow/servflow/servflowai
 ```
 
 ### npm
 
 ```bash
-npm install -g servflow-pro
+npm install -g servflowai
 ```
 
 ### Docker
@@ -67,13 +67,13 @@ npm install -g servflow-pro
 Pull the latest image from Docker Hub:
 
 ```bash
-docker pull servflow/servflow-pro:latest
+docker pull servflow/servflowai:latest
 ```
 
 Run with default configuration:
 
 ```bash
-docker run -p 8080:8080 -p 3000:3000 servflow/servflow-pro
+docker run -p 8080:8080 -p 3000:3000 servflow/servflowai
 ```
 
 Run with custom configuration and persistent storage:
@@ -83,12 +83,12 @@ docker run -p 8080:8080 -p 3000:3000 \
   -v ./config.toml:/data/config.toml \
   -v ./configs:/data/configs \
   -v ./data:/data \
-  servflow/servflow-pro
+  servflow/servflowai
 ```
 
 ### Binary Downloads
 
-Download pre-built binaries from the [Releases](https://github.com/Servflow/servflow-pro/releases) page.
+Download pre-built binaries from the [Releases](https://github.com/Servflow/servflowai/releases) page.
 
 Available platforms:
 - **Linux** (x86_64, arm64)
@@ -96,30 +96,30 @@ Available platforms:
 
 ```bash
 # Download and extract (example for Linux x86_64)
-tar -xzf servflow-pro_Linux_x86_64.tar.gz
+tar -xzf servflowai_Linux_x86_64.tar.gz
 
 # Make executable and run
-chmod +x servflow-pro
-./servflow-pro start --config config.toml --dashboard
+chmod +x servflowai
+./servflowai start --config config.toml --dashboard
 ```
 
 ### From Source
 
 ```bash
 # Clone the repository
-git clone https://github.com/Servflow/servflow-pro.git
-cd servflow-pro
+git clone https://github.com/Servflow/servflowai.git
+cd servflowai
 
 # Build
-go build -o servflow-pro
+go build -o servflowai
 
 # Run
-./servflow-pro start --config config.toml --dashboard
+./servflowai start --config config.toml --dashboard
 ```
 
 ## Configuration
 
-ServFlow Pro uses TOML configuration files. Create a `config.toml` file:
+ServflowAI uses TOML configuration files. Create a `config.toml` file:
 
 ```toml
 [server]
@@ -137,7 +137,7 @@ path = "/data/secrets.db"
 # Optional: OpenTelemetry tracing
 [tracing]
 enabled = false
-service_name = "servflow-pro"
+service_name = "servflowai"
 collector_endpoint = ""
 ```
 
@@ -158,10 +158,10 @@ collector_endpoint = ""
 
 ```bash
 # Start server only
-servflow-pro start --config config.toml
+servflowai start --config config.toml
 
 # Start server with dashboard
-servflow-pro start --config config.toml --dashboard
+servflowai start --config config.toml --dashboard
 ```
 
 ### Creating a Workflow
@@ -241,7 +241,7 @@ Access the dashboard at `http://localhost:3000` when started with the `--dashboa
 
 ## Template Functions
 
-ServFlow Pro supports Go template syntax for dynamic values:
+ServflowAI supports Go template syntax for dynamic values:
 
 ```yaml
 # Access request body
@@ -278,7 +278,7 @@ We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) f
 
 ## License
 
-ServFlow Pro is released under the [MIT License](LICENSE).
+ServflowAI is released under the [MIT License](LICENSE).
 
 ---
 
